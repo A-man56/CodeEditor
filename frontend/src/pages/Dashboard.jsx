@@ -6,21 +6,55 @@ import { FolderIcon, PlusIcon } from "./icons"
 import ProjectModal from "./ProjectModal"
 
 const Dashboard = () => {
-  const [projects, setProjects] = useState([
-    { id: 1, name: "React Todo App", techStack: "React" },
-    { id: 2, name: "Weather API", techStack: "Node.js" },
-    { id: 3, name: "Data Analyzer", techStack: "Python" },
-  ])
+  const [projects, setProjects] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
   const navigate = useNavigate()
 
-  const handleCreateProject = (project) => {
-    const newProject = {
-      id: projects.length + 1,
-      ...project,
+  const handleCreateProject = async (project) => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      console.log("Creating project:", project)
+
+      const res = await fetch("http://localhost:3500/api/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: project.name,
+          techStack: project.techStack,
+        }),
+      })
+
+      console.log("Response status:", res.status)
+
+      const data = await res.json()
+      console.log("Response data:", data)
+
+      if (res.ok) {
+        const newProject = {
+          id: data.projectId,
+          name: project.name,
+          techStack: project.techStack,
+        }
+        setProjects([...projects, newProject])
+        setIsModalOpen(false)
+
+        // Navigate to the workspace with the new project ID
+        navigate(`/workspace/${data.projectId}`)
+      } else {
+        setError(data.message || "Failed to create project")
+        alert("Failed to create project: " + (data.message || "Unknown error"))
+      }
+    } catch (err) {
+      console.error("Project creation error:", err)
+      setError("Server error: " + (err.message || "Unknown error"))
+      alert("Server error: " + (err.message || "Unknown error"))
+    } finally {
+      setIsLoading(false)
     }
-    setProjects([...projects, newProject])
-    setIsModalOpen(false)
   }
 
   const handleProjectClick = (projectId) => {
@@ -30,6 +64,12 @@ const Dashboard = () => {
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Your Projects</h1>
+
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <p>{error}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {projects.map((project) => (
@@ -61,7 +101,9 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {isModalOpen && <ProjectModal onClose={() => setIsModalOpen(false)} onCreate={handleCreateProject} />}
+      {isModalOpen && (
+        <ProjectModal onClose={() => setIsModalOpen(false)} onCreate={handleCreateProject} isLoading={isLoading} />
+      )}
     </div>
   )
 }
