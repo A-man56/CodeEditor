@@ -21,10 +21,10 @@ const Workspace = () => {
     console.log("Initializing socket connection...")
     socketRef.current = io("http://localhost:3500")
 
-    // Join the project room
+    // join project room
     socketRef.current.emit("join-project", projectId)
 
-    // Clean up on unmount
+    // clean up on unmount
     return () => {
       if (socketRef.current) {
         console.log("Disconnecting socket...")
@@ -33,45 +33,44 @@ const Workspace = () => {
     }
   }, [projectId])
 
-  // Load project files
-  useEffect(() => {
-    const loadProjectFiles = async () => {
-      console.log("Loading project files for projectId:", projectId)
-      try {
-        setIsLoading(true)
-        const response = await fetch(`http://localhost:3500/api/files/${projectId}`)
+  const loadProjectFiles = async () => {
+    console.log("Loading project files for projectId:", projectId)
+    try {
+      setIsLoading(true)
+      const response = await fetch(`http://localhost:3500/api/files/${projectId}`)
 
-        if (!response.ok) {
-          throw new Error("Failed to load project files")
-        }
-
-        const data = await response.json()
-        console.log("Project files loaded:", data)
-        setFiles(data.files)
-        setProject(data.projectInfo)
-
-        // Select the first file if available
-        if (data.files.length > 0) {
-          const firstFile = findFirstFile(data.files)
-          if (firstFile) {
-            console.log("Selecting first file:", firstFile)
-            handleFileSelect(firstFile)
-          }
-        }
-      } catch (error) {
-        console.error("Error loading project:", error)
-        setTerminalOutput((prev) => [
-          ...prev,
-          {
-            type: "error",
-            text: `Error loading project: ${error.message}`,
-          },
-        ])
-      } finally {
-        setIsLoading(false)
+      if (!response.ok) {
+        throw new Error("Failed to load project files")
       }
-    }
 
+      const data = await response.json()
+      console.log("Project files loaded:", data)
+      setFiles(data.files)
+      setProject(data.projectInfo)
+
+      // slct the first file if available and no file is currently selected
+      if (data.files.length > 0 && !selectedFile) {
+        const firstFile = findFirstFile(data.files)
+        if (firstFile) {
+          console.log("Selecting first file:", firstFile)
+          handleFileSelect(firstFile)
+        }
+      }
+    } catch (error) {
+      console.error("Error loading project:", error)
+      setTerminalOutput((prev) => [
+        ...prev,
+        {
+          type: "error",
+          text: `Error loading project: ${error.message}`,
+        },
+      ])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
     loadProjectFiles()
   }, [projectId])
 
@@ -127,7 +126,7 @@ const Workspace = () => {
         body: JSON.stringify({ content }),
       })
 
-      // Emit the update via socket
+      // emit the update via socket
       socketRef.current.emit("file-update", {
         projectId,
         filePath: path,
@@ -145,7 +144,9 @@ const Workspace = () => {
     }
   }
 
-  // Handle terminal commands
+  //  ++++terminal commands ++++
+
+  
   const handleTerminalCommand = (command) => {
     console.log("Handling terminal command:", command)
     const allowedCommands = ["ls", "pwd", "echo", "npm install", "npm run"]
@@ -212,7 +213,13 @@ const Workspace = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="w-1/5 border-r border-gray-200 bg-gray-50 overflow-y-auto">
-          <FileExplorer files={files} onFileSelect={handleFileSelect} selectedFile={selectedFile} />
+          <FileExplorer
+            files={files}
+            onFileSelect={handleFileSelect}
+            selectedFile={selectedFile}
+            projectId={projectId}
+            onFilesChanged={loadProjectFiles}
+          />
         </div>
 
         <div className="w-4/5 flex flex-col">

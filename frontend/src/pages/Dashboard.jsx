@@ -42,7 +42,7 @@ const Dashboard = () => {
         setProjects([...projects, newProject])
         setIsModalOpen(false)
 
-        // Navigate to the workspace with the new project ID
+        // navigate to the workspace with the new projectid
         navigate(`/workspace/${data.projectId}`)
       } else {
         setError(data.message || "Failed to create project")
