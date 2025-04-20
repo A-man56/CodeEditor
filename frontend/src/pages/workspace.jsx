@@ -18,7 +18,7 @@ const Workspace = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    // Connect to the server
+    console.log("Initializing socket connection...")
     socketRef.current = io("http://localhost:3500")
 
     // Join the project room
@@ -27,6 +27,7 @@ const Workspace = () => {
     // Clean up on unmount
     return () => {
       if (socketRef.current) {
+        console.log("Disconnecting socket...")
         socketRef.current.disconnect()
       }
     }
@@ -35,6 +36,7 @@ const Workspace = () => {
   // Load project files
   useEffect(() => {
     const loadProjectFiles = async () => {
+      console.log("Loading project files for projectId:", projectId)
       try {
         setIsLoading(true)
         const response = await fetch(`http://localhost:3500/api/files/${projectId}`)
@@ -44,6 +46,7 @@ const Workspace = () => {
         }
 
         const data = await response.json()
+        console.log("Project files loaded:", data)
         setFiles(data.files)
         setProject(data.projectInfo)
 
@@ -51,6 +54,7 @@ const Workspace = () => {
         if (data.files.length > 0) {
           const firstFile = findFirstFile(data.files)
           if (firstFile) {
+            console.log("Selecting first file:", firstFile)
             handleFileSelect(firstFile)
           }
         }
@@ -73,6 +77,7 @@ const Workspace = () => {
 
   // Find the first file in the file tree
   const findFirstFile = (nodes) => {
+    console.log("Finding first file in nodes:", nodes)
     for (const node of nodes) {
       if (node.type === "file") return node
       if (node.type === "folder" && node.children) {
@@ -85,6 +90,7 @@ const Workspace = () => {
 
   // Handle file selection
   const handleFileSelect = async (file) => {
+    console.log("Selecting file:", file)
     if (file.type === "file") {
       try {
         const response = await fetch(`http://localhost:3500/api/file/${projectId}/${file.path}`)
@@ -110,6 +116,7 @@ const Workspace = () => {
 
   // Handle file update
   const handleFileUpdate = async (path, content) => {
+    console.log("Updating file:", path)
     try {
       // Update the file on the server
       await fetch(`http://localhost:3500/api/file/${projectId}/${path}`, {
@@ -140,6 +147,7 @@ const Workspace = () => {
 
   // Handle terminal commands
   const handleTerminalCommand = (command) => {
+    console.log("Handling terminal command:", command)
     const allowedCommands = ["ls", "pwd", "echo", "npm install", "npm run"]
     const isAllowed = allowedCommands.some((cmd) => command.startsWith(cmd))
 
@@ -169,6 +177,7 @@ const Workspace = () => {
   }
 
   const listFiles = (nodes, prefix = "") => {
+    console.log("Listing files with prefix:", prefix)
     let result = []
     for (const node of nodes) {
       if (node.type === "file") {
