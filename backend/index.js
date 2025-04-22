@@ -10,8 +10,10 @@ const http = require("http")
 const { Server } = require("socket.io")
 const fs = require("fs-extra")
 const path = require("path")
+const terminalService = require("./services/terminalService")
+const terminalRouter = require("./routes/terminalRouter")
 
-const PORT = process.env.PORT || 3500
+const PORT = process.env.PORT || 4000
 
 // Create HTTP server
 const server = http.createServer(app)
@@ -21,7 +23,10 @@ const io = new Server(server, {
   cors: {
     origin: "*", // In production, restrict this to your frontend URL
     methods: ["GET", "POST"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
   },
+  pingTimeout: 60000, // Increase ping timeout to prevent premature disconnects
 })
 
 // ========== MIDDLEWARES ==========
@@ -31,10 +36,12 @@ app.use(
     origin: "*", // Allow all origins in development
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   }),
 )
 app.use("/auth", authRouter)
 app.use("/api", workspaceRouter)
+app.use("/api/terminal", terminalRouter)
 
 // ========== CREATE FOLDERS IF NOT EXIST ==========
 const TEMP_PROJECTS_DIR = path.join(__dirname, "temp-projects")
@@ -55,6 +62,9 @@ app.use((err, req, res, next) => {
 // ========== SOCKET.IO SETUP ==========
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id)
+
+  // Store user's active terminals
+  const userTerminals = new Set()
 
   // Handle file updates
   socket.on("file-update", (data) => {
@@ -78,15 +88,124 @@ io.on("connection", (socket) => {
     }
   })
 
+  // Create a new terminal
+  socket.on("terminal-create", async (data) => {
+    try {
+      const { projectId } = data
+      console.log(`Creating terminal for project: ${projectId}`)
+
+      try {
+        const { terminalId, initialCwd } = terminalService.createTerminal(projectId, socket)
+        userTerminals.add(terminalId)
+
+        socket.emit("terminal-created", {
+          terminalId,
+          initialCwd,
+        })
+
+        console.log(`Terminal created: ${terminalId}`)
+      } catch (error) {
+        console.error("Error in terminal creation:", error)
+        socket.emit("terminal-error", {
+          error: `Failed to create terminal: ${error.message}. Make sure node-pty is properly installed.`,
+        })
+      }
+    } catch (error) {
+      console.error("Error creating terminal:", error)
+      socket.emit("terminal-error", {
+        error: error.message,
+      })
+    }
+  })
+
+  // Handle terminal input
+  socket.on("terminal-input", (data) => {
+    try {
+      const { terminalId, input } = data
+
+      if (!userTerminals.has(terminalId)) {
+        throw new Error("Terminal not found or access denied")
+      }
+
+      terminalService.writeToTerminal(terminalId, input)
+    } catch (error) {
+      console.error("Error writing to terminal:", error)
+      socket.emit("terminal-error", {
+        error: error.message,
+      })
+    }
+  })
+
+  // Handle terminal resize
+  socket.on("terminal-resize", (data) => {
+    try {
+      const { terminalId, cols, rows } = data
+
+      if (!userTerminals.has(terminalId)) {
+        throw new Error("Terminal not found or access denied")
+      }
+
+      terminalService.resizeTerminal(terminalId, cols, rows)
+    } catch (error) {
+      console.error("Error resizing terminal:", error)
+    }
+  })
+
+  // Handle terminal close
+  socket.on("terminal-close", (data) => {
+    try {
+      const { terminalId } = data
+
+      if (!userTerminals.has(terminalId)) {
+        return
+      }
+
+      terminalService.killTerminal(terminalId)
+      userTerminals.delete(terminalId)
+
+      console.log(`Terminal closed: ${terminalId}`)
+    } catch (error) {
+      console.error("Error closing terminal:", error)
+    }
+  })
+
   // Join a project room
   socket.on("join-project", (projectId) => {
     socket.join(projectId)
     console.log(`Socket ${socket.id} joined project: ${projectId}`)
   })
 
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id)
+  // Handle ping to keep connection alive
+  socket.on("ping", () => {
+    socket.emit("pong")
   })
+
+  socket.on("disconnect", (reason) => {
+    console.log(`Client disconnected (${reason}):`, socket.id)
+
+    // Clean up user's terminals
+    for (const terminalId of userTerminals) {
+      try {
+        terminalService.killTerminal(terminalId)
+      } catch (error) {
+        console.error(`Error cleaning up terminal ${terminalId}:`, error)
+      }
+    }
+    userTerminals.clear()
+  })
+})
+
+// Clean up all terminals when server shuts down
+process.on("SIGINT", () => {
+  console.log("Cleaning up terminals before exit...")
+  terminalService.cleanupAllTerminals()
+  process.exit(0)
+})
+
+process.on("SIGTERM", () => {
+  console.log("Cleaning up terminals before exit...")
+  terminalService.cleanupAllTerminals()
+  process.exit(0)
 })
 
 // ========== ROOT ROUTE TEST ==========

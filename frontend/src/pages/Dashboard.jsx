@@ -4,6 +4,8 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { FolderIcon, PlusIcon } from "./icons"
 import ProjectModal from "./ProjectModal"
+import ServerStatus from "../components/ServerStatus"
+import TroubleshootingGuide from "../components/TroubleshootingGuide"
 
 const Dashboard = () => {
   const [projects, setProjects] = useState([])
@@ -18,6 +20,21 @@ const Dashboard = () => {
       setError(null)
 
       console.log("Creating project:", project)
+
+      // Check if server is running first
+      try {
+        const pingResponse = await fetch("http://localhost:3500/root", {
+          method: "GET",
+          timeout: 5000,
+        })
+
+        if (!pingResponse.ok) {
+          throw new Error("Backend server is not responding properly")
+        }
+      } catch (pingError) {
+        console.error("Server ping failed:", pingError)
+        throw new Error("Cannot connect to the backend server. Please make sure it's running at http://localhost:3500")
+      }
 
       const res = await fetch("http://localhost:3500/api/create", {
         method: "POST",
@@ -42,7 +59,7 @@ const Dashboard = () => {
         setProjects([...projects, newProject])
         setIsModalOpen(false)
 
-        // navigate to the workspace with the new projectid
+        // Navigate to the workspace with the new project ID
         navigate(`/workspace/${data.projectId}`)
       } else {
         setError(data.message || "Failed to create project")
@@ -63,13 +80,19 @@ const Dashboard = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">Your Projects</h1>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold">Your Projects</h1>
+        <ServerStatus />
+      </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <p className="font-bold">Error</p>
           <p>{error}</p>
         </div>
       )}
+
+      {error && error.includes("Cannot connect") && <TroubleshootingGuide />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {projects.map((project) => (

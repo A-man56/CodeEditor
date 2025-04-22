@@ -149,8 +149,9 @@ router.get("/files/:projectId", async (req, res) => {
         const stats = fs.statSync(fullPath)
 
         // Skip project-info.json and node_modules
+        // if (file === "project-info.json" || file === "node_modules") {
         if (file === "project-info.json" || file === "node_modules") {
-          console.log("Skipping file:", file)
+        console.log("Skipping file:", file)
           return
         }
 

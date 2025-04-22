@@ -8,10 +8,11 @@ import { cpp } from "@codemirror/lang-cpp"
 import { python } from "@codemirror/lang-python"
 import { vscodeDark } from "@uiw/codemirror-theme-vscode"
 
-const CodePreview = ({ file, onFileUpdate, socket }) => {
+const CodePreview = ({ file, onFileUpdate, socket, commandOutput }) => {
   const [code, setCode] = useState("")
-  const [preview, setPreview] = useState("")
   const [language, setLanguage] = useState(null)
+  const [fileType, setFileType] = useState("")
+  const [displayOutput, setDisplayOutput] = useState("")
 
   useEffect(() => {
     if (file) {
@@ -23,11 +24,11 @@ const CodePreview = ({ file, onFileUpdate, socket }) => {
         case "jsx":
         case "json":
           setLanguage(javascript())
-          setPreview("JavaScript Preview")
+          setFileType("JavaScript")
           break
         case "html":
           setLanguage(html())
-          setPreview("HTML Preview")
+          setFileType("HTML")
           break
         case "cpp":
         case "cc":
@@ -35,22 +36,34 @@ const CodePreview = ({ file, onFileUpdate, socket }) => {
         case "h":
         case "hpp":
           setLanguage(cpp())
-          setPreview("C++ Code")
+          setFileType("C++")
           break
         case "py":
           setLanguage(python())
-          setPreview("Python Code")
+          setFileType("Python")
           break
         case "css":
           setLanguage(html()) // Using HTML for CSS as it has decent CSS syntax highlighting
-          setPreview("CSS Preview")
+          setFileType("CSS")
           break
         default:
           setLanguage(null)
-          setPreview("No Preview")
+          setFileType("Text")
       }
     }
   }, [file])
+
+  // Process command output for display
+  useEffect(() => {
+    if (commandOutput) {
+      // Clean up ANSI escape codes and other terminal control characters
+      const cleanOutput = commandOutput
+        .replace(/\u001b\[\d+m/g, "") // Remove ANSI color codes
+        .replace(/\r\n/g, "\n") // Normalize line endings
+
+      setDisplayOutput(cleanOutput)
+    }
+  }, [commandOutput])
 
   // Send code updates to the server when the code changes
   const handleCodeChange = (value) => {
@@ -106,10 +119,24 @@ const CodePreview = ({ file, onFileUpdate, socket }) => {
           </div>
         </div>
 
-        {/* Preview */}
-        <div className="w-1/2 p-4 overflow-auto">
-          <div className="border border-gray-200 rounded-md p-4 h-full flex items-center justify-center bg-white">
-            {preview}
+        {/* Preview/Output */}
+        <div className="w-1/2 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-auto">
+            {displayOutput ? (
+              <div className="h-full bg-gray-900 text-white p-4 font-mono text-sm overflow-auto">
+                <div className="mb-2 text-gray-400 flex items-center justify-between">
+                  <span>Command Output:</span>
+                  <button onClick={() => setDisplayOutput("")} className="text-xs text-gray-400 hover:text-white">
+                    Clear
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap">{displayOutput}</pre>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-md p-4 h-full flex items-center justify-center bg-white">
+                {fileType} Preview
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -12,27 +12,62 @@ const Workspace = () => {
   const [project, setProject] = useState(null)
   const [files, setFiles] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
-  const [terminalOutput, setTerminalOutput] = useState([])
+  const [commandOutput, setCommandOutput] = useState("")
   const [isLoading, setIsLoading] = useState(true)
-  const socketRef = useRef(null)
+  const [socket, setSocket] = useState(null)
+  const [socketError, setSocketError] = useState(null)
+  const socketInitialized = useRef(false)
 
   // Initialize socket connection
   useEffect(() => {
+    if (socketInitialized.current) return
+
     console.log("Initializing socket connection...")
-    socketRef.current = io("http://localhost:3500")
 
-    // join project room
-    socketRef.current.emit("join-project", projectId)
+    try {
+      const socketConnection = io("http://localhost:3500", {
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 10000,
+      })
 
-    // clean up on unmount
-    return () => {
-      if (socketRef.current) {
+      socketConnection.on("connect", () => {
+        console.log("Socket connected:", socketConnection.id)
+        setSocketError(null)
+
+        // Join the project room
+        socketConnection.emit("join-project", projectId)
+        setSocket(socketConnection)
+      })
+
+      socketConnection.on("connect_error", (error) => {
+        console.error("Socket connection error:", error)
+        setSocketError(`Connection error: ${error.message}`)
+      })
+
+      socketConnection.on("disconnect", (reason) => {
+        console.log("Socket disconnected:", reason)
+      })
+
+      socketConnection.on("reconnect_failed", () => {
+        console.error("Socket reconnection failed")
+        setSocketError("Failed to connect to server after multiple attempts")
+      })
+
+      socketInitialized.current = true
+
+      // Clean up on unmount
+      return () => {
         console.log("Disconnecting socket...")
-        socketRef.current.disconnect()
+        socketConnection.disconnect()
       }
+    } catch (error) {
+      console.error("Error initializing socket:", error)
+      setSocketError(`Socket initialization error: ${error.message}`)
     }
   }, [projectId])
 
+  // Load project files
   const loadProjectFiles = async () => {
     console.log("Loading project files for projectId:", projectId)
     try {
@@ -48,7 +83,7 @@ const Workspace = () => {
       setFiles(data.files)
       setProject(data.projectInfo)
 
-      // slct the first file if available and no file is currently selected
+      // Select the first file if available and no file is currently selected
       if (data.files.length > 0 && !selectedFile) {
         const firstFile = findFirstFile(data.files)
         if (firstFile) {
@@ -58,13 +93,7 @@ const Workspace = () => {
       }
     } catch (error) {
       console.error("Error loading project:", error)
-      setTerminalOutput((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: `Error loading project: ${error.message}`,
-        },
-      ])
+      setCommandOutput(`Error loading project: ${error.message}`)
     } finally {
       setIsLoading(false)
     }
@@ -100,15 +129,11 @@ const Workspace = () => {
 
         const data = await response.json()
         setSelectedFile({ ...file, content: data.content })
+        // Clear command output when selecting a new file
+        setCommandOutput("")
       } catch (error) {
         console.error("Error loading file:", error)
-        setTerminalOutput((prev) => [
-          ...prev,
-          {
-            type: "error",
-            text: `Error loading file: ${error.message}`,
-          },
-        ])
+        setCommandOutput(`Error loading file: ${error.message}`)
       }
     }
   }
@@ -126,69 +151,23 @@ const Workspace = () => {
         body: JSON.stringify({ content }),
       })
 
-      // emit the update via socket
-      socketRef.current.emit("file-update", {
-        projectId,
-        filePath: path,
-        content,
-      })
+      // Emit the update via socket
+      if (socket && socket.connected) {
+        socket.emit("file-update", {
+          projectId,
+          filePath: path,
+          content,
+        })
+      }
     } catch (error) {
       console.error("Error updating file:", error)
-      setTerminalOutput((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: `Error updating file: ${error.message}`,
-        },
-      ])
+      setCommandOutput(`Error updating file: ${error.message}`)
     }
   }
 
-  //  ++++terminal commands ++++
-
-  
-  const handleTerminalCommand = (command) => {
-    console.log("Handling terminal command:", command)
-    const allowedCommands = ["ls", "pwd", "echo", "npm install", "npm run"]
-    const isAllowed = allowedCommands.some((cmd) => command.startsWith(cmd))
-
-    if (isAllowed) {
-      let output = ""
-
-      if (command === "ls") {
-        output = listFiles(files).join("\n")
-      } else if (command === "pwd") {
-        output = `/workspace/${projectId}`
-      } else if (command.startsWith("echo ")) {
-        output = command.substring(5)
-      } else if (command.startsWith("npm install")) {
-        output = "Installing dependencies...\nAdded 1283 packages in 25s\nDone!"
-      } else if (command.startsWith("npm run")) {
-        output = "Starting development server...\nServer running at http://localhost:3000"
-      }
-
-      setTerminalOutput((prev) => [...prev, { type: "command", text: command }, { type: "output", text: output }])
-    } else {
-      setTerminalOutput((prev) => [
-        ...prev,
-        { type: "command", text: command },
-        { type: "error", text: "Error: Command not allowed for security reasons." },
-      ])
-    }
-  }
-
-  const listFiles = (nodes, prefix = "") => {
-    console.log("Listing files with prefix:", prefix)
-    let result = []
-    for (const node of nodes) {
-      if (node.type === "file") {
-        result.push(prefix + node.name)
-      } else if (node.type === "folder") {
-        result.push(prefix + node.name + "/")
-        result = result.concat(listFiles(node.children || [], prefix + node.name + "/"))
-      }
-    }
-    return result
+  // Handle command output
+  const handleCommandOutput = (output) => {
+    setCommandOutput(output)
   }
 
   if (isLoading) {
@@ -205,13 +184,23 @@ const Workspace = () => {
   return (
     <div className="h-screen flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-3">
-        <h1 className="text-xl font-semibold">
-          {project?.name || "Project"}
-          <span className="text-sm text-gray-500 ml-2">({project?.techStack})</span>
-        </h1>
+        <div className="flex justify-between items-center">
+          <h1 className="text-xl font-semibold">
+            {project?.name || "Project"}
+            <span className="text-sm text-gray-500 ml-2">({project?.techStack})</span>
+          </h1>
+
+          {socketError && (
+            <div className="text-sm text-red-500 flex items-center">
+              <span className="inline-block w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+              Server connection error
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* File Explorer */}
         <div className="w-1/5 border-r border-gray-200 bg-gray-50 overflow-y-auto">
           <FileExplorer
             files={files}
@@ -223,12 +212,19 @@ const Workspace = () => {
         </div>
 
         <div className="w-4/5 flex flex-col">
+          {/* Code Preview */}
           <div className="flex-1 overflow-hidden">
-            <CodePreview file={selectedFile} onFileUpdate={handleFileUpdate} socket={socketRef.current} />
+            <CodePreview
+              file={selectedFile}
+              onFileUpdate={handleFileUpdate}
+              socket={socket}
+              commandOutput={commandOutput}
+            />
           </div>
 
+          {/* Terminal */}
           <div className="h-1/3 border-t border-gray-200">
-            <Terminal output={terminalOutput} onCommand={handleTerminalCommand} />
+            <Terminal projectId={projectId} socket={socket} onCommandOutput={handleCommandOutput} />
           </div>
         </div>
       </div>
