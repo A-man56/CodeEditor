@@ -29,6 +29,9 @@ const io = new Server(server, {
   pingTimeout: 60000, // Increase ping timeout to prevent premature disconnects
 })
 
+// Make io available to routes
+app.set("io", io)
+
 // ========== MIDDLEWARES ==========
 app.use(bodyParser.json({ limit: "50mb" }))
 app.use(
@@ -69,19 +72,29 @@ io.on("connection", (socket) => {
   // Handle file updates
   socket.on("file-update", (data) => {
     try {
-      const { projectId, filePath, content } = data
+      const { projectId, filePath, content, isFolder, action } = data
       const fullPath = path.join(TEMP_PROJECTS_DIR, projectId, filePath)
 
-      // Ensure the directory exists
-      fs.ensureDirSync(path.dirname(fullPath))
+      if (isFolder) {
+        // Handle folder creation
+        fs.ensureDirSync(fullPath)
+        console.log(`Folder created: ${fullPath}`)
+      } else {
+        // Ensure the directory exists
+        fs.ensureDirSync(path.dirname(fullPath))
 
-      // Write the updated content to the file
-      fs.writeFileSync(fullPath, content)
-
-      console.log(`File updated: ${fullPath}`)
+        // Write the updated content to the file
+        fs.writeFileSync(fullPath, content || "")
+        console.log(`File updated: ${fullPath}`)
+      }
 
       // Broadcast the update to all other clients viewing the same project
-      socket.to(projectId).emit("file-updated", { filePath, content })
+      socket.to(projectId).emit("file-updated", {
+        filePath,
+        content,
+        isFolder,
+        action,
+      })
     } catch (error) {
       console.error("Error updating file:", error)
       socket.emit("error", { message: "Failed to update file", error: error.message })

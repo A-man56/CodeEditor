@@ -149,6 +149,7 @@ const Terminal = ({ projectId, socket, onCommandOutput }) => {
     }
   }
 
+  // Modify the handleSubmit function to handle more commands
   const handleSubmit = async (e) => {
     e.preventDefault()
 
@@ -165,20 +166,21 @@ const Terminal = ({ projectId, socket, onCommandOutput }) => {
 
     try {
       // Special case for clear command
-      if (command.trim() === "clear") {
+      if (command.trim() === "clear" || command.trim() === "cls") {
         setOutput([])
         setCommand("")
         setIsLoading(false)
         return
       } else if (command.trim() === "help") {
         const helpText = `Available commands:
-- Basic: ls, dir, cd, pwd, mkdir, touch, rm, cat
-- Node.js: node, npm
-- Python: python, pip
-- Utilities: echo, grep, find
-- Terminal: clear, help
+- Basic: ls, dir, cd, pwd, mkdir, touch, rm, cat, clear, cls
+- Development: node, npm, npx, yarn, python, pip, g++, gcc, make
+- Git: git, gh
+- Utilities: echo, grep, find, tar, zip, unzip
+- And many more standard commands
 
-Note: For security reasons, some commands and operations are restricted.`
+Note: For security reasons, some commands and operations are restricted.
+You cannot navigate outside the project directory or use certain dangerous commands.`
 
         setOutput((prev) => [
           ...prev,
@@ -198,7 +200,41 @@ Note: For security reasons, some commands and operations are restricted.`
         return
       } else {
         // Use the HTTP API for all commands
-        await handleFallbackCommand(command)
+        const response = await fetch(`http://localhost:3500/api/terminal/exec/${projectId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            command: command,
+            cwd: currentDirectory, // Send the current directory with the command
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`)
+        }
+
+        const result = await response.json()
+
+        // Update current directory if it was changed
+        if (result.cwd) {
+          setCurrentDirectory(result.cwd)
+        }
+
+        // Add output to terminal
+        setOutput((prev) => [
+          ...prev,
+          {
+            type: result.error ? "error" : "output",
+            text: result.output || "Command executed successfully",
+          },
+        ])
+
+        // Send output to code preview
+        if (onCommandOutput) {
+          onCommandOutput(result.output)
+        }
       }
     } catch (error) {
       console.error("Command execution error:", error)

@@ -29,6 +29,7 @@ const Workspace = () => {
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 10000,
+        transports: ["websocket", "polling"], // Try WebSocket first, then fall back to polling
       })
 
       socketConnection.on("connect", () => {
@@ -54,18 +55,21 @@ const Workspace = () => {
         setSocketError("Failed to connect to server after multiple attempts")
       })
 
+      // Listen for file updates from other clients
       socketConnection.on("file-updated", (data) => {
         console.log("Received file update from server:", data)
+
         // If the currently selected file is updated, update its content
         if (selectedFile && data.filePath === selectedFile.path) {
           setSelectedFile((prev) => ({ ...prev, content: data.content }))
         }
 
-        // Refresh the file list to show new files/folders
+        // Always refresh the file list to show new files/folders
         loadProjectFiles()
       })
 
       socketInitialized.current = true
+      setSocket(socketConnection)
 
       // Clean up on unmount
       return () => {

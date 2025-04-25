@@ -8,8 +8,9 @@ const TEMP_DIR = path.join(__dirname, "..", "temp-projects")
 // Store active terminals
 const terminals = new Map()
 
-// List of allowed commands for security
+// Update the ALLOWED_COMMANDS array to be more permissive
 const ALLOWED_COMMANDS = [
+  // Basic commands
   "ls",
   "dir",
   "cd",
@@ -24,13 +25,66 @@ const ALLOWED_COMMANDS = [
   "mv",
   "find",
   "grep",
+  "clear",
+  "cls",
+  "help",
+  "touch",
+  "nano",
+  "less",
+  "more",
+  "head",
+  "tail",
+
+  // Development commands
   "node",
   "npm",
+  "npx",
+  "yarn",
   "python",
+  "python3",
   "pip",
-  "clear",
-  "help",
-  "touch"
+  "pip3",
+  "gcc",
+  "g++",
+  "make",
+  "cmake",
+  "javac",
+  "java",
+  "dotnet",
+
+  // Git commands
+  "git",
+  "gh",
+
+  // Additional utilities
+  "tar",
+  "zip",
+  "unzip",
+  "gzip",
+  "gunzip",
+  "bzip2",
+  "bunzip2",
+  "awk",
+  "sed",
+  "sort",
+  "uniq",
+  "wc",
+  "diff",
+  "patch",
+  "ps",
+  "kill",
+  "env",
+  "export",
+  "set",
+  "alias",
+  "unalias",
+
+  // Package managers
+  "apt-get",
+  "apt",
+  "yum",
+  "brew",
+  "pacman",
 ]
 
 // Commands that should be blocked for security reasons
@@ -64,15 +118,10 @@ try {
   pty = null
 }
 
-// Check if a command is allowed
+// Modify the isCommandAllowed function to be more permissive
 function isCommandAllowed(command) {
   // Extract the base command (before any arguments)
   const baseCommand = command.trim().split(" ")[0]
-
-  // Check if it's in the allowed list
-  if (!ALLOWED_COMMANDS.includes(baseCommand)) {
-    return false
-  }
 
   // Check for blocked patterns
   for (const pattern of BLOCKED_PATTERNS) {
@@ -81,6 +130,25 @@ function isCommandAllowed(command) {
     }
   }
 
+  // Special check for cd command to prevent escaping project directory
+  if (baseCommand === "cd") {
+    const args = command.trim().split(" ")
+    if (args.length > 1) {
+      const targetDir = args[1]
+
+      // Allow cd .. but we'll check the actual path after resolution
+      if (targetDir === "..") {
+        return true
+      }
+
+      // Check for absolute path attempts
+      if (targetDir.startsWith("/") || targetDir.match(/^[A-Z]:\\/i)) {
+        return false
+      }
+    }
+  }
+
+  // If it's not explicitly blocked, allow it
   return true
 }
 
