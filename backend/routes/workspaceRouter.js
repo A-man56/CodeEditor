@@ -5,6 +5,7 @@ const path = require("path")
 const simpleGit = require("simple-git")
 const { exec } = require("child_process")
 const { v4: uuidv4 } = require("uuid")
+const portManager = require("../utils/portManager")
 
 const TEMP_DIR = path.join(__dirname, "..", "temp-projects")
 const CLONE_TEMP = path.join(__dirname, "..", "clones-temp") // temp folder to clone full repo
@@ -23,12 +24,12 @@ const FOLDER_MAP = {
 const REPO_URL = "https://github.com/A-man56/code-templates.git"
 router.post("/create", async (req, res) => {
   const { techStack, name } = req.body
-  console.log("Received project creation request:", { techStack, name }) 
+  console.log("Received project creation request:", { techStack, name })
 
   try {
     // Validate name and techStack
     if (!name) {
-      console.log("No name provided") 
+      console.log("No name provided")
       return res.status(400).json({ message: "Project name is required" })
     }
 
@@ -37,11 +38,11 @@ router.post("/create", async (req, res) => {
       return res.status(400).json({ message: "Invalid tech stack" })
     }
 
-    console.log("Input validated successfully") 
+    console.log("Input validated successfully")
 
     // Generate a unique project ID
     const projectId = uuidv4()
-    console.log("Generated project ID:", projectId) 
+    console.log("Generated project ID:", projectId)
 
     const subFolder = FOLDER_MAP[techStack]
     const projectFolder = path.join(TEMP_DIR, projectId)
@@ -60,7 +61,7 @@ router.post("/create", async (req, res) => {
     const sourceSubfolder = path.join(clonePath, subFolder)
     if (!fs.existsSync(sourceSubfolder)) {
       console.error("Template folder not found:", sourceSubfolder)
-      await fs.remove(clonePath) 
+      await fs.remove(clonePath)
       return res.status(500).json({ message: "Template folder not found in repo" })
     }
 
@@ -69,29 +70,62 @@ router.post("/create", async (req, res) => {
     await fs.copy(sourceSubfolder, projectFolder)
     console.log("Template copied successfully")
 
+    // Assign a port to the project if it's a React or Node.js project
+    let assignedPort = null
+    if (techStack === "React" || techStack === "Node.js") {
+      try {
+        assignedPort = await portManager.assignPortToProject(projectId)
+        console.log(`Assigned port ${assignedPort} to project ${projectId}`)
+      } catch (portError) {
+        console.error("Error assigning port:", portError)
+        // Continue without a port if assignment fails
+      }
+    }
+
     // Create a project info file to store metadata
     const projectInfo = {
       id: projectId,
       name: name,
       techStack: techStack,
       createdAt: new Date().toISOString(),
+      port: assignedPort,
     }
 
     await fs.writeJson(path.join(projectFolder, "project-info.json"), projectInfo)
     console.log("Project info saved")
+
+    // If it's a React project, update the package.json with the assigned port
+    if (techStack === "React" && assignedPort) {
+      try {
+        const packageJsonPath = path.join(projectFolder, "package.json")
+        if (fs.existsSync(packageJsonPath)) {
+          const packageJson = await fs.readJson(packageJsonPath)
+
+          // Update the start script to use the assigned port
+          if (packageJson.scripts && packageJson.scripts.start) {
+            packageJson.scripts.start = `PORT=${assignedPort} react-scripts start`
+            await fs.writeJson(packageJsonPath, packageJson, { spaces: 2 })
+            console.log(`Updated package.json with port ${assignedPort}`)
+          }
+        }
+      } catch (packageJsonError) {
+        console.error("Error updating package.json:", packageJsonError)
+        // Continue even if package.json update fails
+      }
+    }
 
     // Clean up clone folder
     console.log("Cleaning up clone folder...")
     await fs.remove(clonePath)
     console.log("Clone folder removed")
 
-    
     console.log("Sending success response")
     res.json({
       message: "Project created successfully!",
       projectId: projectId,
       name: name,
       techStack: techStack,
+      port: assignedPort,
     })
 
     // run npm install in the background
@@ -132,6 +166,57 @@ router.get("/files/:projectId", async (req, res) => {
       console.log("Attempting to read project-info.json...")
       projectInfo = await fs.readJson(path.join(projectPath, "project-info.json"))
       console.log("Project info successfully read:", projectInfo)
+
+      // Check if port is assigned and still valid
+      if (projectInfo.techStack === "React" || projectInfo.techStack === "Node.js") {
+        if (!projectInfo.port) {
+          // Assign a port if not already assigned
+          try {
+            const port = await portManager.assignPortToProject(projectId)
+            projectInfo.port = port
+            await fs.writeJson(path.join(projectPath, "project-info.json"), projectInfo)
+            console.log(`Assigned port ${port} to project ${projectId}`)
+
+            // Update package.json with the assigned port
+            const packageJsonPath = path.join(projectPath, "package.json")
+            if (fs.existsSync(packageJsonPath)) {
+              const packageJson = await fs.readJson(packageJsonPath)
+              if (packageJson.scripts && packageJson.scripts.start) {
+                packageJson.scripts.start = `PORT=${port} react-scripts start`
+                await fs.writeJson(packageJsonPath, packageJson, { spaces: 2 })
+                console.log(`Updated package.json with port ${port}`)
+              }
+            }
+          } catch (portError) {
+            console.error("Error assigning port:", portError)
+          }
+        } else {
+          // Verify the port is still available
+          const isAvailable = await portManager.isPortAvailable(projectInfo.port)
+          if (!isAvailable) {
+            try {
+              // Assign a new port
+              const newPort = await portManager.assignPortToProject(projectId)
+              projectInfo.port = newPort
+              await fs.writeJson(path.join(projectPath, "project-info.json"), projectInfo)
+              console.log(`Reassigned port ${newPort} to project ${projectId}`)
+
+              // Update package.json with the new port
+              const packageJsonPath = path.join(projectPath, "package.json")
+              if (fs.existsSync(packageJsonPath)) {
+                const packageJson = await fs.readJson(packageJsonPath)
+                if (packageJson.scripts && packageJson.scripts.start) {
+                  packageJson.scripts.start = `PORT=${newPort} react-scripts start`
+                  await fs.writeJson(packageJsonPath, packageJson, { spaces: 2 })
+                  console.log(`Updated package.json with port ${newPort}`)
+                }
+              }
+            } catch (portError) {
+              console.error("Error reassigning port:", portError)
+            }
+          }
+        }
+      }
     } catch (err) {
       console.error("Error reading project info:", err)
       // Continue even if project info is missing
@@ -151,7 +236,7 @@ router.get("/files/:projectId", async (req, res) => {
         // Skip project-info.json and node_modules
         // if (file === "project-info.json" || file === "node_modules") {
         if (file === "project-info.json" || file === "node_modules") {
-        console.log("Skipping file:", file)
+          console.log("Skipping file:", file)
           return
         }
 
@@ -206,19 +291,19 @@ router.get(/^\/file\/([^/]+)\/(.*)/, async (req, res) => {
   const fullPath = path.join(TEMP_DIR, projectId, filePath)
 
   try {
-    console.log("Fetching file for project:", projectId) 
-    console.log("Full file path:", fullPath) 
+    console.log("Fetching file for project:", projectId)
+    console.log("Full file path:", fullPath)
 
     if (!fs.existsSync(fullPath)) {
-      console.log("File not found at path:", fullPath) 
+      console.log("File not found at path:", fullPath)
       return res.status(404).json({ message: "File not found" })
     }
 
     const stats = fs.statSync(fullPath)
-    console.log("File stats:", stats) 
+    console.log("File stats:", stats)
 
     if (stats.isDirectory()) {
-      console.log("The path is a directory, not a file:", fullPath) 
+      console.log("The path is a directory, not a file:", fullPath)
       return res.status(400).json({ message: "Path is a directory, not a file" })
     }
 
@@ -239,9 +324,9 @@ router.post(/^\/file\/([^/]+)\/(.*)/, async (req, res) => {
   const fullPath = path.join(TEMP_DIR, projectId, filePath)
 
   try {
-    console.log("Updating file for project:", projectId) 
-    console.log("File path:", fullPath) 
-    console.log("Content length:", content.length) 
+    console.log("Updating file for project:", projectId)
+    console.log("File path:", fullPath)
+    console.log("Content length:", content.length)
 
     // Ensure the directory exists
     fs.ensureDirSync(path.dirname(fullPath))
@@ -252,7 +337,7 @@ router.post(/^\/file\/([^/]+)\/(.*)/, async (req, res) => {
 
     res.json({ message: "File updated successfully" })
   } catch (error) {
-    console.error("Error updating file:", error) 
+    console.error("Error updating file:", error)
     res.status(500).json({ message: "Failed to update file", error: error.message })
   }
 })
@@ -397,6 +482,57 @@ router.delete("/delete/:projectId", async (req, res) => {
       message: "Failed to delete file/folder",
       error: error.message,
     })
+  }
+})
+
+// Get project port
+router.get("/port/:projectId", async (req, res) => {
+  const { projectId } = req.params
+
+  try {
+    console.log(`Getting port for project ${projectId}`)
+
+    const projectPath = path.join(TEMP_DIR, projectId)
+    if (!fs.existsSync(projectPath)) {
+      return res.status(404).json({ message: "Project not found" })
+    }
+
+    // Read project info
+    const projectInfoPath = path.join(projectPath, "project-info.json")
+    if (!fs.existsSync(projectInfoPath)) {
+      return res.status(404).json({ message: "Project info not found" })
+    }
+
+    const projectInfo = await fs.readJson(projectInfoPath)
+
+    if (!projectInfo.port) {
+      // Try to assign a port if not already assigned
+      try {
+        const port = await portManager.assignPortToProject(projectId)
+        projectInfo.port = port
+        await fs.writeJson(projectInfoPath, projectInfo)
+        console.log(`Assigned port ${port} to project ${projectId}`)
+
+        // Update package.json with the assigned port
+        const packageJsonPath = path.join(projectPath, "package.json")
+        if (fs.existsSync(packageJsonPath)) {
+          const packageJson = await fs.readJson(packageJsonPath)
+          if (packageJson.scripts && packageJson.scripts.start) {
+            packageJson.scripts.start = `PORT=${port} react-scripts start`
+            await fs.writeJson(packageJsonPath, packageJson, { spaces: 2 })
+            console.log(`Updated package.json with port ${port}`)
+          }
+        }
+      } catch (portError) {
+        console.error("Error assigning port:", portError)
+        return res.status(500).json({ message: "Failed to assign port", error: portError.message })
+      }
+    }
+
+    res.json({ port: projectInfo.port })
+  } catch (error) {
+    console.error("Error getting project port:", error)
+    res.status(500).json({ message: "Failed to get project port", error: error.message })
   }
 })
 

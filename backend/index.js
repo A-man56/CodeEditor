@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 4000
 // Create HTTP server
 const server = http.createServer(app)
 
-// Initialize Socket.io
+// Initialize Socket.io with improved CORS settings
 const io = new Server(server, {
   cors: {
     origin: "*", // In production, restrict this to your frontend URL
@@ -27,6 +27,8 @@ const io = new Server(server, {
     allowedHeaders: ["Content-Type", "Authorization"],
   },
   pingTimeout: 60000, // Increase ping timeout to prevent premature disconnects
+  transports: ["polling", "websocket"], // Enable both polling and websocket
+  allowEIO3: true, // Allow Engine.IO version 3 clients
 })
 
 // Make io available to routes

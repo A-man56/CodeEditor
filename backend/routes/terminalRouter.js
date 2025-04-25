@@ -3,6 +3,7 @@ const router = express.Router()
 const { spawn } = require("child_process")
 const path = require("path")
 const fs = require("fs-extra")
+const portManager = require("../utils/portManager")
 
 // Base directory for all projects
 const TEMP_DIR = path.join(__dirname, "..", "temp-projects")
@@ -138,7 +139,7 @@ function isCommandAllowed(command) {
 }
 
 // Execute a command in a project directory
-router.post("/exec/:projectId", (req, res) => {
+router.post("/exec/:projectId", async (req, res) => {
   const { projectId } = req.params
   const { command } = req.body
   const { cwd } = req.body // Get the current working directory from the request
@@ -167,6 +168,44 @@ router.post("/exec/:projectId", (req, res) => {
       error: true,
       cwd: currentWorkingDir,
     })
+  }
+
+  // Special handling for npm start to use the assigned port
+  if (command === "npm start") {
+    try {
+      // Read the project info to get the assigned port
+      const projectInfoPath = path.join(projectPath, "project-info.json")
+      if (fs.existsSync(projectInfoPath)) {
+        const projectInfo = await fs.readJson(projectInfoPath)
+
+        if (projectInfo.port) {
+          // Check if the port is still available
+          const isAvailable = await portManager.isPortAvailable(projectInfo.port)
+
+          if (!isAvailable) {
+            // Assign a new port if the current one is not available
+            try {
+              const newPort = await portManager.assignPortToProject(projectId)
+              projectInfo.port = newPort
+              await fs.writeJson(projectInfoPath, projectInfo)
+              console.log(`Reassigned port ${newPort} to project ${projectId}`)
+            } catch (portError) {
+              console.error("Error reassigning port:", portError)
+            }
+          }
+
+          // Use the assigned port for npm start
+          return res.json({
+            output: `Starting the development server on port ${projectInfo.port}...\nYou can view the app at: http://localhost:${projectInfo.port}/`,
+            cwd: currentWorkingDir,
+            success: true,
+          })
+        }
+      }
+    } catch (error) {
+      console.error("Error handling npm start:", error)
+      // Continue with normal execution if there's an error
+    }
   }
 
   // Modify the CD command handling to properly handle parent directory navigation

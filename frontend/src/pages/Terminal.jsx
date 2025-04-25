@@ -19,39 +19,50 @@ const Terminal = ({ projectId, socket, onCommandOutput }) => {
   const [error, setError] = useState(null)
   const [fallbackMode, setFallbackMode] = useState(false)
   const connectionAttemptRef = useRef(0)
+  const messageShownRef = useRef(false)
 
   // Initialize terminal connection when socket and projectId are available
   useEffect(() => {
+    // Always set the current directory to ensure it's available
+    setCurrentDirectory(`/workspace/${projectId}`)
+
     if (!socket || !projectId) {
-      setOutput((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: "Socket connection not available. Using fallback mode.",
-        },
-      ])
+      if (!messageShownRef.current) {
+        setOutput((prev) => [
+          ...prev,
+          {
+            type: "system",
+            text: "Socket connection not available. Using fallback mode.",
+          },
+        ])
+        messageShownRef.current = true
+      }
       setFallbackMode(true)
-      setCurrentDirectory(`/workspace/${projectId}`)
       return
     }
 
     // Check if socket is connected
     if (!socket.connected) {
-      setOutput((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: "Socket not connected. Waiting for connection...",
-        },
-      ])
+      if (!messageShownRef.current) {
+        setOutput((prev) => [
+          ...prev,
+          {
+            type: "system",
+            text: "Socket not connected. Using fallback mode.",
+          },
+        ])
+        messageShownRef.current = true
+      }
+      setFallbackMode(true)
 
-      // Wait for socket to connect
+      // Set up a one-time connect handler
       const connectHandler = () => {
         setOutput((prev) => [...prev, { type: "system", text: "Socket connected. Initializing terminal..." }])
+        setFallbackMode(false)
         initializeTerminal()
       }
 
-      socket.on("connect", connectHandler)
+      socket.once("connect", connectHandler)
 
       return () => {
         socket.off("connect", connectHandler)
@@ -251,54 +262,6 @@ You cannot navigate outside the project directory or use certain dangerous comma
     }
   }
 
-  // Handle commands in fallback mode
-  const handleFallbackCommand = async (cmd) => {
-    try {
-      // Use the terminal API to execute commands
-      const response = await fetch(`http://localhost:3500/api/terminal/exec/${projectId}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ command: cmd }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`)
-      }
-
-      const result = await response.json()
-
-      // Update current directory if it was changed
-      if (result.cwd) {
-        setCurrentDirectory(result.cwd)
-      }
-
-      // Add output to terminal
-      setOutput((prev) => [
-        ...prev,
-        {
-          type: result.error ? "error" : "output",
-          text: result.output || "Command executed successfully",
-        },
-      ])
-
-      // Send output to code preview
-      if (onCommandOutput) {
-        onCommandOutput(result.output)
-      }
-    } catch (error) {
-      console.error("Command execution error:", error)
-      setOutput((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: `Error: ${error.message}`,
-        },
-      ])
-    }
-  }
-
   const handleKeyDown = (e) => {
     // Handle up arrow for history
     if (e.key === "ArrowUp") {
@@ -389,8 +352,7 @@ You cannot navigate outside the project directory or use certain dangerous comma
           onKeyDown={handleKeyDown}
           className="flex-1 bg-transparent outline-none"
           autoFocus
-          disabled={isLoading && !fallbackMode}
-          placeholder={!isConnected && !fallbackMode ? "Terminal disconnected..." : ""}
+          disabled={isLoading}
         />
       </form>
     </div>
